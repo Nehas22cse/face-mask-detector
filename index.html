@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Face Mask Detector</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: rgba(255,255,255,0.08);
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .page {
+    position: relative; z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+  }
+
+  header { text-align: center; margin-bottom: 3rem; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid rgba(56,189,248,0.3);
+    border-radius: 4px;
+    padding: 4px 10px;
+    margin-bottom: 1.2rem;
+  }
+
+  .badge-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 0.8rem;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .subtitle {
+    font-size: 1rem;
+    color: var(--muted);
+    max-width: 480px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* Model loading banner */
+  .model-banner {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 1.2rem;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  .model-banner.ready { border-color: rgba(52,211,153,0.3); color: var(--green); }
+  .model-banner.error { border-color: rgba(248,113,113,0.3); color: var(--red); }
+
+  .mini-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(56,189,248,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .main-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .upload-zone {
+    padding: 2.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+  }
+
+  .drop-area {
+    width: 100%;
+    border: 2px dashed rgba(56,189,248,0.25);
+    border-radius: 12px;
+    padding: 2.5rem 1.5rem;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .drop-area:hover, .drop-area.drag-over {
+    border-color: var(--accent);
+    background: rgba(56,189,248,0.04);
+  }
+
+  .drop-icon {
+    width: 56px; height: 56px;
+    background: rgba(56,189,248,0.1);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.2s;
+  }
+
+  .drop-area:hover .drop-icon { transform: scale(1.05); }
+  .drop-icon svg { width: 28px; height: 28px; stroke: var(--accent); }
+  .drop-label { font-size: 0.95rem; font-weight: 500; }
+  .drop-sub { font-size: 0.8rem; color: var(--muted); }
+
+  #file-input { display: none; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent);
+    color: #0a0e1a;
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem 1.4rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .preview-section {
+    display: none;
+    padding: 2rem 2.5rem;
+    gap: 2rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .preview-section.visible { display: flex; }
+
+  .preview-col { flex: 0 0 220px; }
+
+  .preview-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .preview-img-wrap {
+    width: 220px; height: 220px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    position: relative;
+  }
+
+  .preview-img-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .results-col { flex: 1; min-width: 240px; }
+
+  .result-status { display: none; flex-direction: column; gap: 1rem; }
+  .result-status.visible { display: flex; }
+
+  .result-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-weight: 700;
+    display: inline-block;
+  }
+
+  .result-badge.mask { background: rgba(52,211,153,0.15); color: var(--green); border: 1px solid rgba(52,211,153,0.3); }
+  .result-badge.no-mask { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+  .result-badge.uncertain { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
+
+  .result-title {
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .result-title.mask { color: var(--green); }
+  .result-title.no-mask { color: var(--red); }
+  .result-title.uncertain { color: var(--yellow); }
+
+  .confidence-row { display: flex; flex-direction: column; gap: 6px; }
+
+  .conf-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .conf-bar-wrap { display: flex; align-items: center; gap: 10px; }
+
+  .conf-bar-bg {
+    flex: 1; height: 6px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .conf-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 1s cubic-bezier(0.4,0,0.2,1);
+    width: 0%;
+  }
+
+  .conf-bar-fill.mask { background: var(--green); }
+  .conf-bar-fill.no-mask { background: var(--red); }
+  .conf-bar-fill.uncertain { background: var(--yellow); }
+
+  .conf-pct {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: right;
+  }
+
+  .raw-score {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    padding: 8px 10px;
+    background: var(--surface2);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .raw-score span { color: var(--accent); }
+
+  .analyzing-wrap { display: none; flex-direction: column; gap: 10px; padding-top: 4px; }
+  .analyzing-wrap.visible { display: flex; }
+
+  .analyze-text {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+
+  .analyze-action { display: none; margin-top: 0.5rem; }
+
+  .bottom-bar {
+    padding: 1.2rem 2.5rem;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px;
+  }
+
+  .bottom-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  .btn-reset {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .btn-reset:hover { border-color: var(--accent); color: var(--accent); }
+
+  .error-msg {
+    display: none;
+    margin: 0 2.5rem 1.5rem;
+    padding: 12px 14px;
+    background: rgba(248,113,113,0.08);
+    border: 1px solid rgba(248,113,113,0.25);
+    border-radius: 8px;
+    font-size: 0.83rem;
+    color: var(--red);
+    line-height: 1.5;
+  }
+
+  .error-msg.visible { display: block; }
+
+  .tech-note {
+    margin-top: 1.5rem;
+    text-align: center;
+    font-size: 0.78rem;
+    color: rgba(148,163,184,0.5);
+    font-family: var(--mono);
+  }
+
+  .scan-line {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 2s linear infinite;
+    display: none;
+  }
+
+  .scanning .scan-line { display: block; }
+
+  @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+
+  @media (max-width: 600px) {
+    .preview-col { flex: 0 0 100%; }
+    .preview-img-wrap { width: 100%; height: 240px; }
+    .upload-zone, .preview-section { padding: 1.5rem; }
+    .bottom-bar { padding: 1rem 1.5rem; }
+    .error-msg { margin: 0 1.5rem 1rem; }
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="page">
+
+  <header>
+    <div class="badge"><div class="badge-dot"></div>CNN Face Mask Detector</div>
+    <h1>Mask <span>Detection</span><br>System</h1>
+    <p class="subtitle">Upload a photo and the trained CNN model will predict whether the person is wearing a face mask.</p>
+  </header>
+
+  <div class="model-banner" id="model-banner">
+    <div class="mini-spinner" id="model-spinner"></div>
+    <span id="model-status-text">Loading model weights...</span>
+  </div>
+
+  <div class="main-card">
+    <div class="upload-zone">
+      <div class="drop-area" id="drop-area">
+        <div class="scan-line"></div>
+        <div class="drop-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+            <path d="M3 15v3a3 3 0 003 3h12a3 3 0 003-3v-3"/>
+            <path d="M12 3v12m0-12-4 4m4-4 4 4"/>
+          </svg>
+        </div>
+        <p class="drop-label">Drop your image here</p>
+        <p class="drop-sub">PNG, JPG, WEBP — max 10 MB</p>
+      </div>
+      <input type="file" id="file-input" accept="image/*" />
+      <button class="btn-primary" id="upload-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Choose Image
+      </button>
+    </div>
+
+    <div class="preview-section" id="preview-section">
+      <div class="preview-col">
+        <p class="preview-label">Input Image</p>
+        <div class="preview-img-wrap" id="img-wrap">
+          <div class="scan-line"></div>
+          <img id="preview-img" src="" alt="Preview" />
+        </div>
+      </div>
+
+      <div class="results-col">
+        <p class="preview-label">Analysis Result</p>
+
+        <div class="analyzing-wrap" id="analyzing-wrap">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="mini-spinner"></div>
+            <span class="analyze-text" id="analyze-text">Preprocessing image...</span>
+          </div>
+          <p style="font-size:0.78rem;color:var(--muted);font-family:var(--mono)" id="analyze-sub">Resizing to 224×224 → normalising → running inference</p>
+        </div>
+
+        <div class="result-status" id="result-status">
+          <div class="result-badge" id="result-badge"></div>
+          <div class="result-title" id="result-title"></div>
+          <div class="confidence-row">
+            <span class="conf-label">Confidence</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar-bg">
+                <div class="conf-bar-fill" id="conf-bar"></div>
+              </div>
+              <span class="conf-pct" id="conf-pct"></span>
+            </div>
+          </div>
+          <div class="raw-score" id="raw-score"></div>
+        </div>
+
+        <div class="analyze-action" id="analyze-action">
+          <button class="btn-primary" id="analyze-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            Analyse Image
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="bottom-bar">
+      <span class="bottom-meta">Model: CNN · 3×Conv2D · Sigmoid · 224×224 input</span>
+      <button class="btn-reset" id="reset-btn">↺ Reset</button>
+    </div>
+  </div>
+
+  <p class="tech-note">Powered by TensorFlow.js · Your trained model · No data leaves your device</p>
+</div>
+
+<script>
+let model = null;
+
+const modelBanner = document.getElementById('model-banner');
+const modelSpinner = document.getElementById('model-spinner');
+const modelStatusText = document.getElementById('model-status-text');
+
+const dropArea = document.getElementById('drop-area');
+const fileInput = document.getElementById('file-input');
+const uploadBtn = document.getElementById('upload-btn');
+const previewSection = document.getElementById('preview-section');
+const previewImg = document.getElementById('preview-img');
+const imgWrap = document.getElementById('img-wrap');
+const analyzingWrap = document.getElementById('analyzing-wrap');
+const analyzeText = document.getElementById('analyze-text');
+const analyzeSub = document.getElementById('analyze-sub');
+const resultStatus = document.getElementById('result-status');
+const resultBadge = document.getElementById('result-badge');
+const resultTitle = document.getElementById('result-title');
+const confBar = document.getElementById('conf-bar');
+const confPct = document.getElementById('conf-pct');
+const rawScore = document.getElementById('raw-score');
+const analyzeAction = document.getElementById('analyze-action');
+const analyzeBtn = document.getElementById('analyze-btn');
+const resetBtn = document.getElementById('reset-btn');
+const errorMsg = document.getElementById('error-msg');
+
+async function loadModel() {
+  try {
+    modelStatusText.textContent = 'Loading model weights...';
+    model = await tf.loadLayersModel('tfjs_model/model.json');
+    modelBanner.classList.add('ready');
+    modelSpinner.style.display = 'none';
+    modelStatusText.textContent = '✓ Model loaded — ready to detect';
+  } catch (e) {
+    modelBanner.classList.add('error');
+    modelSpinner.style.display = 'none';
+    modelStatusText.textContent = '✗ Could not load model — make sure tfjs_model/ folder is in the same directory';
+  }
+}
+
+loadModel();
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+dropArea.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('drag-over'); });
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('drag-over'));
+dropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropArea.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(file) {
+  if (!file.type.startsWith('image/')) { showError('Please upload a valid image file (PNG, JPG, WEBP).'); return; }
+  if (file.size > 10 * 1024 * 1024) { showError('File too large. Maximum size is 10 MB.'); return; }
+
+  hideError();
+  const reader = new FileReader();
+  reader.onload = e => {
+    previewImg.src = e.target.result;
+    previewSection.classList.add('visible');
+    analyzingWrap.classList.remove('visible');
+    resultStatus.classList.remove('visible');
+    analyzeAction.style.display = 'block';
+    imgWrap.classList.remove('scanning');
+  };
+  reader.readAsDataURL(file);
+}
+
+analyzeBtn.addEventListener('click', async () => {
+  if (!model) { showError('Model is still loading. Please wait a moment and try again.'); return; }
+
+  analyzeAction.style.display = 'none';
+  analyzingWrap.classList.add('visible');
+  resultStatus.classList.remove('visible');
+  imgWrap.classList.add('scanning');
+  hideError();
+
+  try {
+    analyzeText.textContent = 'Preprocessing image...';
+    analyzeSub.textContent = 'Resizing to 224×224 → normalising pixel values';
+    await sleep(300);
+
+    const score = await predict(previewImg);
+
+    analyzeText.textContent = 'Running inference...';
+    analyzeSub.textContent = 'Forward pass through CNN layers → sigmoid output';
+    await sleep(400);
+
+    imgWrap.classList.remove('scanning');
+    analyzingWrap.classList.remove('visible');
+    displayResult(score);
+  } catch (err) {
+    imgWrap.classList.remove('scanning');
+    analyzingWrap.classList.remove('visible');
+    analyzeAction.style.display = 'block';
+    showError('Prediction failed: ' + err.message);
+  }
+});
+
+async function predict(imgEl) {
+  return tf.tidy(() => {
+    const tensor = tf.browser.fromPixels(imgEl)
+      .resizeBilinear([224, 224])
+      .toFloat()
+      .div(255.0)
+      .expandDims(0);
+
+    const output = model.predict(tensor);
+    return output.dataSync()[0];
+  });
+}
+
+function displayResult(score) {
+  // Match notebook logic: prediction > 0.5 → without_mask, else → with_mask
+  let label, cssClass, confidence;
+
+  if (score > 0.5) {
+    label = 'Without Mask';
+    cssClass = 'no-mask';
+    confidence = Math.round(score * 100);
+  } else {
+    label = 'With Mask';
+    cssClass = 'mask';
+    confidence = Math.round((1 - score) * 100);
+  }
+
+  resultBadge.textContent = label;
+  resultBadge.className = 'result-badge ' + cssClass;
+  resultTitle.textContent = label;
+  resultTitle.className = 'result-title ' + cssClass;
+
+  confBar.className = 'conf-bar-fill ' + cssClass;
+  confPct.textContent = confidence + '%';
+  confPct.style.color = cssClass === 'mask' ? 'var(--green)' : 'var(--red)';
+
+  rawScore.innerHTML = `Raw sigmoid output: <span>${score.toFixed(6)}</span> · Threshold: <span>0.5</span>`;
+
+  resultStatus.classList.add('visible');
+  setTimeout(() => { confBar.style.width = confidence + '%'; }, 50);
+}
+
+resetBtn.addEventListener('click', () => {
+  previewSection.classList.remove('visible');
+  analyzingWrap.classList.remove('visible');
+  resultStatus.classList.remove('visible');
+  analyzeAction.style.display = 'none';
+  imgWrap.classList.remove('scanning');
+  hideError();
+  confBar.style.width = '0%';
+  fileInput.value = '';
+});
+
+function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.add('visible'); }
+function hideError() { errorMsg.classList.remove('visible'); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
